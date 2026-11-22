@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark"><meta name="apple-mobile-web-app-capable" content="yes">
+<title>SMZ Edelmetall</title>
+<style>
+:root{--bg:#f4efe6;--card:#fbf8f2;--ink:#26231f;--mut:#7a7367;--acc:#9c7a3c;--line:#e2d9c8;--bad:#a4402f;--ok:#4f7a4a;--warn:#a8691a;color-scheme:light}
+:root[data-theme=dark]{--bg:#17150f;--card:#211e17;--ink:#efe8d8;--mut:#a39a86;--acc:#d5b273;--line:#38332a;--bad:#e0735f;--ok:#8fc088;--warn:#e0b04f;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,system-ui,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+header{padding:18px 18px 6px}h1{font:300 26px/1.2 ui-serif,Georgia,serif;letter-spacing:.14em;margin:0;text-transform:uppercase}h1 b{color:var(--acc);font-weight:600}
+h2{font:400 13px/1.3 system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:22px 0 8px}
+main{padding:0 14px calc(96px + env(safe-area-inset-bottom));max-width:760px;margin:0 auto;overflow-x:hidden}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin:10px 0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;min-height:48px;text-align:left}
+button,select,input{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer}
+.btn{min-height:44px;padding:0 16px;border-radius:22px;border:1px solid var(--acc);background:transparent;color:var(--acc)}
+.btn.p{background:var(--acc);color:var(--bg)}.chip{min-height:44px;min-width:44px;padding:0 12px;border-radius:22px;border:1px solid var(--line);color:var(--mut)}
+.chip[aria-pressed=true]{border-color:var(--acc);color:var(--acc)}
+input,select{width:100%;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-size:16px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 0}
+.mut{color:var(--mut);font-size:14px}.big{font:300 30px/1.2 ui-serif,Georgia,serif}.good{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;border:1px solid currentColor;border-radius:8px;padding:1px 6px;margin-left:6px}
+.scroll{display:flex;gap:6px;overflow-x:auto;padding:4px 0}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{min-height:58px;font-size:12px;letter-spacing:.06em;color:var(--mut)}nav button[aria-current=page]{color:var(--acc)}nav span{display:block;font-size:20px}
+#toast{position:fixed;left:14px;right:14px;bottom:calc(76px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:14px;display:none}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}svg{width:100%;height:auto;display:block}pre{white-space:pre-wrap;word-break:break-all;font-size:12px}
+@media(prefers-reduced-motion:no-preference){main{animation:f .25s ease}@keyframes f{from{opacity:.4}to{opacity:1}}}
+</style></head><body>
+<header><h1><b>SMZ</b> Edelmetall</h1></header><main id="v" tabindex="-1"></main><nav id="nav" aria-label="Hauptnavigation"></nav><div id="toast" role="status" aria-live="polite"></div>
+<script>/* SMZ Edelmetall – mathematischer Kern V1 (Phase B). Keine UI, keine Netzwerkzugriffe. */
+(function (root) {
+  'use strict';
+  const G_PER_OZ = 31.1034768, G_PER_KG = 1000, G_PER_T = 1e6, G_PER_LB = 453.59237;
+  const UNIT_G = { g: 1, kg: G_PER_KG, oz: G_PER_OZ, t: G_PER_T, lb: G_PER_LB };
+  const clamp = x => Math.min(1, Math.max(0, x));
+  const toGrams = (v, u) => { if (!(u in UNIT_G)) throw new Error('Unbekannte Einheit: ' + u); return v * UNIT_G[u]; };
+  const pricePerGram = (price, unit) => price / UNIT_G[unit];
+  // Quotierung: USD je EUR  =>  EUR = USD / (USD je EUR)
+  const usdToEur = (usd, usdPerEur) => { if (!(usdPerEur > 0)) throw new Error('Ungültiger FX'); return usd / usdPerEur; };
+
+  // Midrank-Perzentil (0..1): (#kleiner + 0,5·#gleich)/N
+  function midrank(series, x) {
+    let lt = 0, eq = 0;
+    for (const v of series) { if (v < x) lt++; else if (v === x) eq++; }
+    return (lt + 0.5 * eq) / series.length;
+  }
+  const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+  const ma = (a, n) => a.length >= n ? mean(a.slice(-n)) : null;
+
+  // Gold-Silber-Ratio; Paare nur bei gleicher Währung und Zeitabweichung <= maxMs
+  function ratio(gold, silver, maxMs = 36e5) {
+    if (gold.currency !== silver.currency) return { value: null, reason: 'Währungen verschieden' };
+    if (Math.abs(gold.asOf - silver.asOf) > maxMs) return { value: null, reason: 'Kurse nicht synchron' };
+    return { value: gold.pricePerOz / silver.pricePerOz };
+  }
+  const ratioDeviation = (r, avg) => (r / avg - 1);
+  function ratioCategory(pct, nPairs, coverage) {
+    if (nPairs < 250 || coverage < 0.8) return null;
+    const p = pct * 100;
+    if (p < 20) return 'Gold deutlich relativ günstiger';
+    if (p < 40) return 'Gold relativ günstiger';
+    if (p <= 60) return 'Historisch eher neutral';
+    if (p <= 80) return 'Silber relativ günstiger';
+    return 'Silber deutlich relativ günstiger';
+  }
+
+  // Scorefaktoren (K = Kauf, V = 100-K, außer Perzentil/Kosten wie im Pflichtenheft 2.2)
+  const W = { pct: .30, ma: .20, range: .15, fx: .10, mom: .15, cost: .10 };
+  function scores(o) {
+    // o: {prices[], fxSeries[]|null, currency:'EUR'|'USD', buyPremium|null, sellDiscount|null, stale}
+    const p = o.prices, cur = p[p.length - 1], f = {}, why = [];
+    if (o.stale) return { total: null, reason: 'Kurs veraltet' };
+    const P = midrank(p, cur);
+    const ma50 = ma(p, 50), ma200 = ma(p, 200);
+    const mn = Math.min(...p), mx = Math.max(...p);
+    const r = n => p.length > n ? cur / p[p.length - 1 - n] - 1 : null;
+    const r21 = r(21), r126 = r(126);
+    f.pct = { K: 100 * (1 - P), V: 100 * P };
+    if (ma50 !== null && ma200 !== null) { const k = 50 - 25 * Math.tanh((cur / ma50 - 1) / .10) - 25 * Math.tanh((cur / ma200 - 1) / .20); f.ma = { K: k, V: 100 - k }; }
+    { const k = mx === mn ? 50 : 100 * clamp(1 - (cur - mn) / (mx - mn)); f.range = { K: k, V: 100 - k }; if (mx === mn) why.push('Hoch=Tief: neutral'); }
+    if (o.currency === 'EUR' && o.fxSeries) { const k = 100 * midrank(o.fxSeries, o.fxSeries[o.fxSeries.length - 1]); f.fx = { K: k, V: 100 - k }; }
+    else if (o.currency === 'USD') f.fx = { K: 50, V: 50 };
+    if (r21 !== null && r126 !== null) { const k = 50 - 25 * Math.tanh(r21 / .10) - 25 * Math.tanh(r126 / .25); f.mom = { K: k, V: 100 - k }; }
+    if (o.buyPremium != null && o.sellDiscount != null) f.cost = { K: 100 * clamp(1 - Math.max(0, o.buyPremium) / .30), V: 100 * clamp(1 - Math.max(0, o.sellDiscount) / .30) };
+    const must = ['pct', 'ma', 'range', 'mom'].filter(k => !f[k]);
+    const wSum = Object.keys(f).reduce((s, k) => s + W[k], 0);
+    if (must.length || wSum < .8) return { total: null, factors: f, reason: 'Pflichtfaktoren fehlen: ' + must.join(',') };
+    let K = 0, V = 0, w = {};
+    for (const k in f) { K += W[k] * f[k].K; V += W[k] * f[k].V; w[k] = W[k] / wSum; }
+    return { total: { K: K / wSum, V: V / wSum }, factors: f, weights: w, notes: why };
+  }
+
+  // Lots: Integer-Cent-Kostenbasis, Gramm mit 8 Nachkommastellen; Restbestand-Reste gehen auf die letzte Buchung
+  const q8 = x => Math.round(x * 1e8) / 1e8;
+  function newLot(id, depot, metal, grossG, fineness, costCents, date) {
+    const fine = q8(grossG * fineness);
+    return { id, depot, metal, fine, costCents, date, origin: id, sold: [], };
+  }
+  function sell(lot, soldFine, netProceedsCents) {
+    if (soldFine > lot.fine + 1e-9) throw new Error('Verkauf über Restbestand');
+    const full = Math.abs(soldFine - lot.fine) < 1e-9;
+    const alloc = full ? lot.costCents : Math.round(lot.costCents * (soldFine / lot.fine));
+    lot.fine = full ? 0 : q8(lot.fine - soldFine);
+    lot.costCents -= alloc;
+    return { allocCostCents: alloc, realizedCents: netProceedsCents - alloc };
+  }
+  function transfer(lot, fineG, toDepot, newId) {
+    if (fineG > lot.fine + 1e-9) throw new Error('Transfer über Restbestand');
+    const full = Math.abs(fineG - lot.fine) < 1e-9;
+    const cost = full ? lot.costCents : Math.round(lot.costCents * (fineG / lot.fine));
+    const moved = { ...lot, id: newId, depot: toDepot, fine: q8(fineG), costCents: cost, sold: [] }; // origin/date erhalten
+    lot.fine = full ? 0 : q8(lot.fine - fineG); lot.costCents -= cost;
+    return moved;
+  }
+
+  // Simulator: Attribution Metall → FX → Kosten (Summe = Gesamtergebnis)
+  function simulate(s) {
+    // s: fineG, buySpotUsd/g(inkl. nichts), buyFx, buyPremium, buyFixedEur, sellSpotUsd/g, sellFx, sellDiscount, sellFeeEur, inflation, years
+    const buyUsd = s.fineG * s.buySpotUsdG, buyEurRef = usdToEur(buyUsd, s.buyFx);
+    const buyTotal = buyEurRef * (1 + s.buyPremium) + s.buyFixedEur;
+    const sellGrossEur = usdToEur(s.fineG * s.sellSpotUsdG * (1 - s.sellDiscount), s.sellFx);
+    const sellNet = sellGrossEur - s.sellFeeEur;
+    const profit = sellNet - buyTotal, ret = buyTotal > 0 ? profit / buyTotal : null;
+    const metalEffect = usdToEur(s.fineG * s.sellSpotUsdG, s.buyFx) - buyEurRef;
+    const fxEffect = usdToEur(s.fineG * s.sellSpotUsdG, s.sellFx) - usdToEur(s.fineG * s.sellSpotUsdG, s.buyFx);
+    const costEffect = profit - metalEffect - fxEffect; // alle Kosten/Abschläge, Rest exakt
+    const real = ret === null || s.inflation <= -1 ? null : (1 + ret) / Math.pow(1 + s.inflation, s.years) - 1;
+    // Break-even-Spot (USD/g): sellNet = buyTotal
+    const be = ((buyTotal + s.sellFeeEur) * s.sellFx) / (s.fineG * (1 - s.sellDiscount));
+    return { buyTotal, sellNet, profit, ret, real, attribution: { metalEffect, fxEffect, costEffect }, breakEvenSpotUsdG: be, warnNegative: sellNet < 0 };
+  }
+
+  // Alarm-Zustandsautomat (Schwelle über/unter), einmalig pro beobachtetem Übertritt
+  function makeAlarm(dir, threshold) { return { dir, threshold, state: 'init', last: null }; }
+  function alarmStep(a, value, stale) {
+    if (stale || value == null) return false;
+    const cond = a.dir === 'above' ? value > a.threshold : value < a.threshold;
+    let fired = false;
+    if (a.state === 'init') a.state = cond ? 'ausgelöst-initial' : 'scharf'; // kein Trigger beim Erstellen
+    else if (a.state === 'scharf' && cond) { a.state = 'ausgelöst'; fired = true; }
+    else if ((a.state === 'ausgelöst' || a.state === 'ausgelöst-initial') && !cond) a.state = 'scharf';
+    return fired;
+  }
+
+
+  // ---------- Phase B2: Datenqualität, Paarung, Mindestdaten, TWR, 24h-Fenster ----------
+  // Serien: [{date:'YYYY-MM-DD', v:Number, quoteType?:String}] – nur echte Beobachtungen, nie interpoliert.
+  const isWeekend = d => { const w = new Date(d + 'T00:00:00Z').getUTCDay(); return w === 0 || w === 6; };
+  // Referenz-Handelstage = Vereinigung der Datumswerte geprüfter Serien ohne Wochenenden (Feiertage: nur was Quellen liefern)
+  function referenceDays(...seriesList) {
+    const set = new Set();
+    for (const s of seriesList) for (const o of s) if (!isWeekend(o.date)) set.add(o.date);
+    return [...set].sort();
+  }
+  function windowSeries(series, endDate, years) {
+    const e = new Date(endDate + 'T00:00:00Z'); const st = new Date(e); st.setUTCFullYear(e.getUTCFullYear() - years);
+    const a = st.toISOString().slice(0, 10);
+    return series.filter(o => o.date > a && o.date <= endDate);
+  }
+  // Lücken: Wochentage ohne Beobachtung zwischen erstem und letztem Datum (werden gemeldet, nie gefüllt)
+  function findGaps(series) {
+    if (series.length < 2) return [];
+    const have = new Set(series.map(o => o.date)), out = [];
+    const d = new Date(series[0].date + 'T00:00:00Z'), end = new Date(series[series.length - 1].date + 'T00:00:00Z');
+    for (; d <= end; d.setUTCDate(d.getUTCDate() + 1)) { const k = d.toISOString().slice(0, 10); if (!isWeekend(k) && !have.has(k)) out.push(k); }
+    return out;
+  }
+  function pairSeries(a, b) {
+    const mb = new Map(b.map(o => [o.date, o.v])), out = [];
+    for (const o of a) if (mb.has(o.date)) out.push({ date: o.date, a: o.v, b: mb.get(o.date) });
+    return out;
+  }
+  // Sprünge markieren, NICHT löschen
+  function flagJumps(series, thr = 0.2) {
+    const f = []; for (let i = 1; i < series.length; i++) { const r = series[i].v / series[i - 1].v - 1; if (Math.abs(r) > thr) f.push({ date: series[i].date, change: r }); } return f;
+  }
+  function checkMinData(series, refDays, opt = {}) {
+    const minN = opt.minN || 252, minCov = opt.minCov || 0.8;
+    const ref = new Set(refDays), n = series.length;
+    const hit = series.filter(o => ref.has(o.date)).length;
+    const coverage = refDays.length ? hit / refDays.length : 0;
+    const types = new Set(series.map(o => o.quoteType || 'unbekannt'));
+    const reasons = [];
+    if (n < minN) reasons.push(`Nur ${n} gültige Tageswerte (min. ${minN})`);
+    if (coverage < minCov) reasons.push(`Abdeckung ${(coverage * 100).toFixed(1)} % (min. ${minCov * 100} %)`);
+    if (types.size > 1) reasons.push('Vermischte Kursarten: ' + [...types].join(', '));
+    return { ok: reasons.length === 0, n, coverage, reasons };
+  }
+  // Gesamtscore aus datierten Serien (EUR: FX nur auf gemeinsamen Tagen, sonst Sperre)
+  function scoreSeries(o) {
+    const q = checkMinData(o.series, o.refDays, o.opt);
+    if (!q.ok) return { total: null, reason: q.reasons.join('; '), quality: q };
+    let fxVals = null;
+    if (o.currency === 'EUR') {
+      if (!o.fxSeries) return { total: null, reason: 'FX-Reihe fehlt', quality: q };
+      const pr = pairSeries(o.series, o.fxSeries);
+      if (pr.length / o.series.length < 0.8) return { total: null, reason: 'FX nicht synchron zu Metallreihe', quality: q };
+      fxVals = pr.map(x => x.b);
+    }
+    const r = scores({ prices: o.series.map(x => x.v), fxSeries: fxVals, currency: o.currency, buyPremium: o.buyPremium, sellDiscount: o.sellDiscount, stale: o.stale });
+    r.quality = q; return r;
+  }
+  // TWR: periods = [{vStart (nach vorherigem Cashflow), vEnd (vor nächstem Cashflow)}]; fehlt eine Grenzbewertung -> nicht berechenbar
+  function twr(periods) {
+    if (!periods || !periods.length) return { value: null, reason: 'nicht berechenbar: keine Teilperioden' };
+    let prod = 1;
+    for (const p of periods) {
+      if (!Number.isFinite(p.vStart) || !Number.isFinite(p.vEnd) || p.vStart <= 0) return { value: null, reason: 'nicht berechenbar: Grenzbewertung fehlt' };
+      prod *= p.vEnd / p.vStart;
+    }
+    return { value: prod - 1 };
+  }
+  // 24h-Änderung nur mit zeitlich passendem Vergleichskurs (Toleranz tolMs um now-24h)
+  function change24h(hist, nowMs, price, tolMs = 3 * 36e5) {
+    const target = nowMs - 864e5; let best = null;
+    for (const h of hist) { const d = Math.abs(h.t - target); if (d <= tolMs && (!best || d < best.d)) best = { d, v: h.v }; }
+    return best ? price / best.v - 1 : null;
+  }
+
+  const api = { referenceDays, windowSeries, findGaps, pairSeries, flagJumps, checkMinData, scoreSeries, twr, change24h, isWeekend, G_PER_OZ, G_PER_KG, G_PER_T, G_PER_LB, toGrams, pricePerGram, usdToEur, midrank, ma, ratio, ratioDeviation, ratioCategory, scores, newLot, sell, transfer, simulate, makeAlarm, alarmStep, W };
+  if (typeof module !== 'undefined') module.exports = api; else root.SMZCore = api;
+})(typeof self !== 'undefined' ? self : this);
+</script><script>/* SMZ Edelmetall – Datenadapter (Phase A). Alle Provider-Mappings sind UNGEPRÜFT, bis probe-sources.mjs / die In-App-Prüfung
+   echte Antworten bestätigt hat. Ohne gültiges Mapping liefert der Adapter einen Fehler statt Werte zu raten. */
+(function (root) {
+  'use strict';
+  const get = (o, path) => path.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o);
+  const ERR = { OFFLINE: 'offline', CORS: 'cors_oder_netz', RATE: 'rate_limit', KEY: 'api_key_ungueltig', HTTP: 'http_fehler', INCOMPAT: 'quelle_inkompatibel', NOCFG: 'nicht_konfiguriert', BACKOFF: 'backoff' };
+
+  // cfg: {provider, instrument, quoteType, currency, unit, license, staleAfterMs, timezone, map:{price,asOf}|null, verified}
+  function normalizeQuote(cfg, raw, retrievedAt) {
+    if (!cfg.map) return { ok: false, error: ERR.NOCFG, detail: 'Mapping fehlt – erst Quelle real prüfen' };
+    const price = Number(get(raw, cfg.map.price)), asOfRaw = get(raw, cfg.map.asOf);
+    const asOf = asOfRaw == null ? NaN : Date.parse(asOfRaw);
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(asOf)) return { ok: false, error: ERR.INCOMPAT, detail: 'Preis oder Zeitstempel nicht lesbar' };
+    const flags = []; if (!cfg.verified) flags.push('mapping_ungeprueft');
+    return { ok: true, quote: { provider: cfg.provider, instrument: cfg.instrument, quoteType: cfg.quoteType, price, currency: cfg.currency, unit: cfg.unit, asOf, retrievedAt, timezone: cfg.timezone || 'UTC', license: cfg.license || 'unbekannt', isStale: retrievedAt - asOf > cfg.staleAfterMs, qualityFlags: flags } };
+  }
+
+  // Fetcher: Deduplizierung laufender Anfragen, Mindestabstand, exponentieller Backoff, Fehlerklassifikation.
+  function createFetcher({ fetchImpl, now = Date.now, isOnline = () => true, minIntervalMs = 60000, maxBackoffMs = 3600000 }) {
+    const inflight = new Map(), state = new Map();
+    async function fetchJson(key, url, opts = {}) {
+      const st = state.get(key) || { fails: 0, nextOk: 0, last: 0 };
+      if (inflight.has(key)) return inflight.get(key);
+      if (!opts.force && now() < st.nextOk) return { ok: false, error: ERR.BACKOFF, retryAt: st.nextOk };
+      if (!isOnline()) return { ok: false, error: ERR.OFFLINE };
+      const p = (async () => {
+        let res;
+        try { res = await fetchImpl(url, { headers: opts.headers }); }
+        catch (e) { return fail(st, key, ERR.CORS, 'Netzwerk-/CORS-Fehler (Browser kann beides nicht unterscheiden)'); }
+        if (res.status === 429) return fail(st, key, ERR.RATE, 'Limit erreicht', res.headers && res.headers.get && res.headers.get('retry-after'));
+        if ((res.status === 401 || res.status === 403) && opts.usesKey) return fail(st, key, ERR.KEY);
+        if (!res.ok) return fail(st, key, ERR.HTTP, 'HTTP ' + res.status);
+        let json; try { json = await res.json(); } catch (e) { return fail(st, key, ERR.INCOMPAT, 'Antwort kein JSON'); }
+        state.set(key, { fails: 0, nextOk: now() + minIntervalMs, last: now() });
+        return { ok: true, json };
+      })();
+      inflight.set(key, p);
+      try { return await p; } finally { inflight.delete(key); }
+    }
+    function fail(st, key, error, detail, retryAfter) {
+      const fails = st.fails + 1, back = Math.min(maxBackoffMs, minIntervalMs * 2 ** fails), ra = Number(retryAfter) * 1000;
+      const wait = Number.isFinite(ra) && ra > 0 ? Math.max(ra, back) : back;
+      state.set(key, { fails, nextOk: now() + wait, last: now() });
+      return { ok: false, error, detail, retryAt: now() + wait };
+    }
+    return { fetchJson, _state: state };
+  }
+
+  // Treasury/FRED-CSV: strikt, mit Spaltenangabe; Datum ISO oder MM/DD/YYYY. Keine Interpolation, ungültige Zeilen werden gemeldet.
+  function parseCsvSeries(text, { dateCol, valueCol, delimiter = ',' }) {
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return { rows: [], rejected: [], error: 'leer' };
+    const strip = s => s.trim().replace(/^"|"$/g, '');
+    const head = lines[0].split(delimiter).map(strip), di = head.indexOf(dateCol), vi = head.indexOf(valueCol);
+    if (di < 0 || vi < 0) return { rows: [], rejected: [], error: 'Spalte nicht gefunden: ' + (di < 0 ? dateCol : valueCol) };
+    const rows = [], rejected = [];
+    lines.slice(1).forEach((l, i) => {
+      const c = l.split(delimiter).map(strip); let d = c[di];
+      const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d); if (m) d = `${m[3]}-${m[1]}-${m[2]}`;
+      const m2 = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(d); if (m2) d = `${m2[3]}-${m2[2].padStart(2, '0')}-${m2[1].padStart(2, '0')}`;
+      const v = Number(String(c[vi]).replace(',', '.'));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(v) || c[vi] === '' || c[vi] === '.') rejected.push({ line: i + 2, raw: l }); else rows.push({ date: d, v });
+    });
+    rows.sort((a, b) => a.date < b.date ? -1 : 1);
+    return { rows, rejected };
+  }
+  const api = { ERR, normalizeQuote, createFetcher, parseCsvSeries };
+  if (typeof module !== 'undefined') module.exports = api; else root.SMZAdapters = api;
+})(typeof self !== 'undefined' ? self : this);
+</script><script>const SRC={"_hinweis": "ALLE Einträge sind Kandidaten und UNGEPRÜFT (verified:false), bis probe-sources.mjs bzw. die In-App-Prüfung echte Antworten bestätigt hat. map=null bedeutet: Adapter verweigert Werte.", "gold-api": {"verified": false, "baseUrl": "https://api.gold-api.com/price/{symbol}", "symbols": {"gold": "XAU", "silber": "XAG", "platin": "XPT", "palladium": "XPD", "kupfer": "HG"}, "quoteType": "spot", "currency": "USD", "staleAfterMs": 1800000, "license": "ungeprüft", "units": {"XAU": "oz", "XAG": "oz", "XPT": "oz", "XPD": "oz", "HG": "UNGEKLÄRT (vermutlich lb) – vor Nutzung prüfen"}, "map": {"price": "price", "asOf": "updatedAt"}}, "frankfurter-v2": {"verified": false, "baseUrl": "https://api.frankfurter.dev/v2", "map": null, "notiz": "Endpunkt-Pfade, Quotierungsrichtung, Metallreihen unbekannt – Probe nötig"}, "treasury-csv": {"verified": false, "map": null, "notiz": "CORS vermutlich nicht freigegeben → CSV-Import ist primärer Weg"}, "fed-target-range": {"verified": false, "map": null, "notiz": "Kandidat: FRED-CSV DFEDTARL/DFEDTARU; CORS und Nutzungsbedingungen ungeprüft"}};</script><script>'use strict';
+const C=SMZCore,A=SMZAdapters,$=s=>document.querySelector(s),VERSION='0.3.0 (Phase C)';
+const M=[['au','Gold','XAU'],['ag','Silber','XAG'],['pt','Platin','XPT'],['pd','Palladium','XPD'],['cu','Kupfer','HG']],MN=Object.fromEntries(M.map(m=>[m[0],m[1]]));
+const MODS={fav:'Favoriten',metals:'Metallpreise',movers:'Gewinner/Verlierer',ratio:'Gold-Silber-Ratio',rates:'US-Zinsmonitor',depot:'Depot-Kurzfassung'};
+const DEF={cfg:{cur:'EUR',unit:'oz',theme:'auto',favs:[],order:Object.keys(MODS),hide:[],auto:true},q:{},hist:{},ser:{},fx:null,rates:{},prof:{},alarms:[],ahist:[],depots:[],lots:[],probe:{}};
+let S=JSON.parse(JSON.stringify(DEF)),tab='start',sub=null,sel=null,per='5J',area=false,dbOk=false,imp=null,lastRef=0;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nf=(x,d=2)=>x==null||!isFinite(x)?'–':x.toLocaleString('de-DE',{minimumFractionDigits:d,maximumFractionDigits:d});
+const money=(x,c=S.cfg.cur)=>x==null||!isFinite(x)?'–':x.toLocaleString('de-DE',{style:'currency',currency:c});
+const pc=x=>x==null?'–':(x>0?'+':'')+nf(x*100)+' %',dt=t=>new Date(t).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'});
+const V=id=>{const e=document.getElementById(id);return e?e.value:''},N=id=>parseFloat(String(V(id)).replace(',','.'));
+function toast(m,bad){const t=$('#toast');t.textContent=m;t.style.display='block';t.style.background=bad?'var(--bad)':'var(--ink)';clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display='none',4500)}
+/* ---------- Speicher (IndexedDB, Key-Value, Schema v1) ---------- */
+const idb=()=>new Promise((res,rej)=>{if(!window.indexedDB)return rej(new Error('IndexedDB nicht verfügbar'));const r=indexedDB.open('smz-edelmetall',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+async function load(){try{const d=await idb(),v=await new Promise((r,j)=>{const q=d.transaction('kv').objectStore('kv').get('state');q.onsuccess=()=>r(q.result);q.onerror=()=>j(q.error)});if(v)S=Object.assign(S,v,{cfg:Object.assign(S.cfg,v.cfg)});dbOk=true}catch(e){dbOk=false}}
+async function save(){try{const d=await idb();await new Promise((r,j)=>{const t=d.transaction('kv','readwrite');t.objectStore('kv').put(JSON.parse(JSON.stringify(S)),'state');t.oncomplete=r;t.onerror=t.onabort=()=>j(t.error)});dbOk=true;return true}catch(e){dbOk=false;toast('Speichern fehlgeschlagen – Änderungen gehen beim Schließen verloren: '+e.message,1);return false}}
+/* ---------- Kurse, Umrechnung ---------- */
+const stale=q=>!q||Date.now()-q.asOf>(q.source==='manuell'?864e5:18e5);
+function conv(q,cur,unit){let p=q.price/C.toGrams(1,q.unit);if(q.currency!==cur){const f=S.fx&&S.fx.rate;if(!f)return null;p=q.currency==='USD'?C.usdToEur(p,f):p*f}return p*C.toGrams(1,unit)}
+function qtag(q){return (q.source==='manuell'?'<span class=tag>manuell</span>':'')+(stale(q)?'<span class="tag bad">veraltet</span>':'')+((q.flags||[]).includes('mapping_ungeprueft')?'<span class="tag warn">Mapping ungeprüft</span>':'')}
+/* ---------- Historien (importiert, pro Gramm in Quellwährung) ---------- */
+function rows(id,cur=S.cfg.cur,unit=S.cfg.unit){const s=S.ser[id];if(!s)return[];const g=C.toGrams(1,unit),fx=new Map(((S.ser.fx||{}).rows||[]).map(r=>[r.date,r.v]));const o=[];
+ for(const r of s.rows){let v=r.v;if(s.cur!==cur){const f=fx.get(r.date);if(!f)continue;v=s.cur==='USD'?v/f:v*f}o.push({date:r.date,v:v*g,quoteType:'import'})}return o}
+const lastDate=r=>r.length?r[r.length-1].date:null,today=()=>new Date().toISOString().slice(0,10);
+const ageDays=d=>(Date.now()-Date.parse(d+'T00:00:00Z'))/864e5;
+const DAYS={'1T':1,'1W':7,'1M':30,'3M':91,'6M':182,'1J':365,'3J':1095,'5J':1825,'10J':3650,'20J':7300,Max:1e9};
+function cut(r,p){if(!r.length)return r;const e=Date.parse(lastDate(r)+'T00:00:00Z')-DAYS[p]*864e5;return r.filter(x=>Date.parse(x.date+'T00:00:00Z')>=e)}
+function chart(r){if(r.length<2)return'<p class=mut>Zu wenige Datenpunkte für einen Chart. Historie unter Mehr → CSV-Import laden.</p>';const W=340,H=150,xs=r.map(x=>x.v),mn=Math.min(...xs),sp=(Math.max(...xs)-mn)||1;
+ const d=r.map((x,i)=>(i?'L':'M')+(i/(r.length-1)*W).toFixed(1)+' '+(H-6-(x.v-mn)/sp*(H-12)).toFixed(1)).join('');
+ return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Preisverlauf ${r[0].date} bis ${lastDate(r)}, Minimum ${nf(mn)}, Maximum ${nf(mn+sp)}">${area?`<path d="${d}L${W} ${H}L0 ${H}Z" fill="var(--acc)" opacity=".15"/>`:''}<path d="${d}" fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="row mut"><span>${r[0].date}</span><span>Min ${nf(mn)} · Max ${nf(mn+sp)}</span><span>${lastDate(r)}</span></div>`}
+/* ---------- Analyse (nur Kernfunktionen) ---------- */
+const band=x=>x<20?'sehr schwach':x<40?'eher schwach':x<=60?'neutral/uneindeutig':x<=80?'eher attraktiv':'historisch besonders attraktiv';
+function analysis(id){const all=rows(id);if(!all.length)return'<p class=mut>Keine verwendbare Historie in '+S.cfg.cur+' – kein Score.</p>';const e=lastDate(all),w=C.windowSeries(all,e,5),fx=C.windowSeries(((S.ser.fx||{}).rows||[]).map(r=>({date:r.date,v:r.v})),e,5),
+ pr=S.prof[id]||{},st=ageDays(e)>5;
+ const r=C.scoreSeries({series:w,refDays:C.referenceDays(w,S.cfg.cur==='EUR'?fx:[]),currency:S.cfg.cur,fxSeries:fx.length?fx:null,buyPremium:pr.buy!=null?pr.buy/100:null,sellDiscount:pr.sell!=null?pr.sell/100:null,stale:st});
+ let h=`<p class=mut>Basis: ${w.length} Tageswerte bis ${e} (${S.cfg.cur}, importierte Referenzreihe), Abdeckung ${r.quality?nf(r.quality.coverage*100,1)+' %':'–'}. Historische Indikation, keine Vorhersage.</p>`;
+ if(!r.total)h+=`<div class="card warn"><b>Kein Gesamtscore.</b> ${esc(r.reason)}</div>`;else h+=`<div class=card><div class=row><div>Kaufchance<div class=big>${nf(r.total.K,0)}</div><span class=mut>${band(r.total.K)}</span></div><div>Verkaufschance<div class=big>${nf(r.total.V,0)}</div><span class=mut>${band(r.total.V)}</span></div></div></div>`;
+ if(r.factors)h+='<table><tr><th>Faktor</th><th>K</th><th>V</th><th>Gewicht</th></tr>'+Object.keys(C.W).map(k=>`<tr><td>${{pct:'Preisperzentil',ma:'MA-Abstand',range:'Hoch/Tief',fx:'EUR/USD',mom:'Momentum',cost:'Händlerkosten'}[k]}</td><td>${r.factors[k]?nf(r.factors[k].K,0):'fehlt'}</td><td>${r.factors[k]?nf(r.factors[k].V,0):'fehlt'}</td><td>${r.weights&&r.weights[k]?nf(r.weights[k]*100,0)+' %':'–'}</td></tr>`).join('')+'</table>';
+ return h}
+function ratioData(){const g=rows('au'),s=rows('ag');if(!g.length||!s.length)return null;const e=lastDate(g)<lastDate(s)?lastDate(g):lastDate(s),pr=C.pairSeries(C.windowSeries(g,e,5),C.windowSeries(s,e,5)).map(p=>p.a/p.b);if(!pr.length)return null;
+ const ref=C.referenceDays(C.windowSeries(g,e,5),C.windowSeries(s,e,5)),cur=pr[pr.length-1],avg=pr.reduce((a,b)=>a+b,0)/pr.length,pct=C.midrank(pr,cur);
+ return{n:pr.length,cov:pr.length/ref.length,cur,avg,min:Math.min(...pr),max:Math.max(...pr),pct,cat:C.ratioCategory(pct,pr.length,pr.length/ref.length),e}}
+function ratioCard(){let h='',q1=S.q.au,q2=S.q.ag;if(q1&&q2){const r=C.ratio({currency:q1.currency,asOf:q1.asOf,pricePerOz:q1.price/C.toGrams(1,q1.unit)*C.G_PER_OZ},{currency:q2.currency,asOf:q2.asOf,pricePerOz:q2.price/C.toGrams(1,q2.unit)*C.G_PER_OZ});h+=r.value?`<div class=big>${nf(r.value)}</div><span class=mut>aktuell (Quotes ${dt(q1.asOf)}/${dt(q2.asOf)})</span>${stale(q1)||stale(q2)?'<span class="tag bad">veraltet</span>':''}`:`<p class=warn>Kein aktueller Wert: ${esc(r.reason)}.</p>`}
+ const d=ratioData();if(d)h+=`<p>Historisch (5 J., ${d.n} Paare bis ${d.e}): Ø ${nf(d.avg)}, Min ${nf(d.min)}, Max ${nf(d.max)}; letzter Wert ${nf(d.cur)} (${pc(C.ratioDeviation(d.cur,d.avg))} zu Ø), Perzentil ${nf(d.pct*100,0)}.<br><b>${d.cat?esc(d.cat):'Keine belastbare Kategorie (zu wenig Daten/Abdeckung).'}</b> <span class=mut>Relative Einordnung, keine Kaufempfehlung.</span></p>`;
+ return h||'<p class=mut>Keine Daten: Gold und Silber (aktuell oder Historie) fehlen.</p>'}
+function ratesCard(){const L={fedLow:'Fed-Zielspanne unten',fedHigh:'Fed-Zielspanne oben',nom:'10J US-Treasury nominal',real:'10J US-Treasury real'};const k=Object.keys(L).filter(x=>S.rates[x]);if(!k.length)return'<p class=mut>Keine Zinsdaten. Offizielle CSV importieren oder manuell erfassen (Mehr → Daten erfassen).</p>';
+ return k.map(x=>{const r=S.rates[x],d=r.prev==null?'kein Vergleichswert':r.v>r.prev?'▲ steigend':r.v<r.prev?'▼ sinkend':'● unverändert';return`<div class=row><span>${L[x]}<br><span class=mut>Stand ${esc(r.date)} · ${esc(r.src)}</span></span><span>${nf(r.v)} %<br><span class=mut>${d}</span></span></div>`}).join('')+'<p class=mut>Reale Zinsen können Gold beeinflussen, ohne deterministische Kausalität.</p>'}
+/* ---------- Ansichten ---------- */
+function ctrl(){return`<div class=scroll role=group aria-label="Anzeige">${['EUR','USD'].map(c=>`<button class=chip aria-pressed=${S.cfg.cur===c} data-a=cur data-v=${c}>${c}</button>`).join('')}${['g','kg','oz','t'].map(u=>`<button class=chip aria-pressed=${S.cfg.unit===u} data-a=unit data-v=${u}>${u}</button>`).join('')}</div>`}
+function mrow(id){const q=S.q[id],p=q&&conv(q,S.cfg.cur,S.cfg.unit),fv=S.cfg.favs.includes(id);return`<button class=row data-a=open data-v=${id}><span>${fv?'★ ':''}<b>${MN[id]}</b>${q?qtag(q):''}<br><span class=mut>${q?dt(q.asOf)+' · '+esc(q.source):'kein aktueller Kurs'}</span></span><span class=big style="font-size:22px">${q?(p==null?'<span class="mut" style="font-size:13px">kein EUR/USD-Kurs</span>':money(p)+'<span class=mut style="font-size:13px"> /'+S.cfg.unit+'</span>'):'–'}</span></button>`}
+const ordered=()=>[...M.map(m=>m[0])].sort((a,b)=>S.cfg.favs.includes(b)-S.cfg.favs.includes(a));
+function depotSum(){const eur=S.lots.reduce((a,l)=>a+l.costCents,0)/100;let ref=0,miss=0;for(const l of S.lots){const q=S.q[l.metal],p=q&&conv(q,'EUR','g');p==null?miss++:ref+=p*l.fine}return{n:S.lots.length,eur,ref,miss}}
+function movers(){const o=[];for(const m of M){const r=rows(m[0]);if(r.length>1)o.push({id:m[0],c:r[r.length-1].v/r[r.length-2].v-1,d:lastDate(r)})}return o.sort((a,b)=>b.c-a.c)}
+const MOD={fav:()=>S.cfg.favs.length?S.cfg.favs.map(mrow).join(''):'<p class=mut>Noch keine Favoriten: Metall öffnen und ★ tippen.</p>',metals:()=>ordered().map(mrow).join(''),
+ movers:()=>{const m=movers();return m.length?m.map(x=>`<div class=row><span>${MN[x.id]} <span class=mut>(Schlusskurs ${x.d} vs. Vortagswert)</span></span><b class=${x.c>=0?'good':'bad'}>${pc(x.c)}</b></div>`).join(''):'<p class=mut>Keine Tagesdaten: erst nach Historienimport. Tageshoch/-tief benötigen echte Intraday-/OHLC-Daten und sind nicht verfügbar.</p>'},
+ ratio:ratioCard,rates:ratesCard,depot:()=>{const d=depotSum();return d.n?`<div class=row><span>${d.n} Lots · Anschaffungskosten</span><b>${money(d.eur,'EUR')}</b></div>${d.miss?`<p class=mut>Referenzwert nicht berechenbar (${d.miss} Lots ohne Kurs/EUR-Umrechnung).</p>`:`<div class=row><span>Metallreferenzwert (Spot, kein Händlerpreis)</span><b>${money(d.ref,'EUR')}</b></div>`}`:'<p class=mut>Noch keine Depotbuchungen.</p>'}};
+function vStart(){const n=Object.values(S.q);return ctrl()+`<p class=mut>${n.length?'Letzter Kursstand: '+dt(Math.max(...n.map(q=>q.asOf))):'Keine Kurse geladen. Live-Quellen sind ungeprüft – siehe Mehr → Datenquellen. Alternativ manuell erfassen oder CSV importieren.'}</p><button class="btn p" data-a=refresh>Kurse aktualisieren</button>`+S.cfg.order.filter(k=>!S.cfg.hide.includes(k)).map(k=>`<h2>${MODS[k]}</h2><div class=card>${MOD[k]()}</div>`).join('')}
+function vMarkets(){if(sel)return vMetal(sel);return ctrl()+'<h2>Metalle</h2><div class=card>'+ordered().map(mrow).join('')+'</div>'}
+function vMetal(id){const all=rows(id),r=cut(all,per),q=S.q[id],gaps=C.findGaps(r).length;
+ return`<button class=chip data-a=back>‹ Märkte</button> <button class=chip data-a=fav data-v=${id} aria-pressed=${S.cfg.favs.includes(id)} aria-label="Favorit">★</button><h2>${MN[id]}</h2>${ctrl()}<div class=card>${mrow(id).replace('<button class=row data-a=open data-v='+id+'>','<div class=row>').replace('</button>','</div>')}</div>
+ <div class=scroll role=group aria-label=Zeitraum>${Object.keys(DAYS).map(p=>`<button class=chip aria-pressed=${per===p} data-a=per data-v=${p}>${p}</button>`).join('')}</div>
+ <div class=card>${chart(r)}<p class=mut>${all.length?`Verfügbar: ${all[0].date} bis ${lastDate(all)} (${all.length} Werte${S.ser[id].cur!==S.cfg.cur?', nur Tage mit passendem EUR/USD':''}), importierte Referenzreihe, kein Echtzeitkurs. ${gaps?gaps+' Wochentage ohne Daten (Lücken, nicht aufgefüllt).':''}`:(S.ser[id]?`Historie liegt in ${S.ser[id].cur} vor, aber ohne EUR/USD-Reihe nicht umrechenbar: Anzeige auf ${S.ser[id].cur} stellen oder EUR/USD importieren.`:'Keine Historie importiert.')}</p><button class=chip data-a=area aria-pressed=${area}>Fläche</button> <button class=chip data-a=csvx data-v=${id}>CSV-Export</button></div>
+ <h2>Marktanalyse (5 Jahre)</h2>${analysis(id)}<p class=mut>Nicht verfügbar in dieser Version: Kerzen (keine OHLC-Daten), Zoom/Vollbild/Bildexport, Vergleich mehrerer Metalle.</p>`}
+const f=(id,l,v='',x='')=>`<label for=${id}>${l}</label><input id=${id} value="${esc(v)}" inputmode=decimal ${x}>`,so=(id,l,o,c)=>`<label for=${id}>${l}</label><select id=${id}>${o.map(x=>{const a=Array.isArray(x)?x:[x,x];return`<option value="${a[0]}" ${a[0]==c?'selected':''}>${a[1]}</option>`}).join('')}</select>`;
+function vSim(){const R=S.simRes;return`<h2>Simulator (Szenario, keine Prognose)</h2><div class=card><p class=mut>Preise in USD je Gramm Feingewicht (1 oz = ${C.G_PER_OZ} g). EUR = USD ÷ (USD je EUR).</p>${f('s_g','Feingewicht (g)')}${f('s_bs','Kauf-Spot (USD/g)')}${f('s_bfx','EUR/USD beim Kauf (USD je EUR)')}${f('s_bp','Händleraufschlag Kauf (%)','0')}${f('s_bf','Fixe Kaufkosten inkl. Versand (EUR)','0')}${f('s_ss','Verkaufs-Spot (USD/g)')}${f('s_sfx','EUR/USD beim Verkauf')}${f('s_sd','Händlerabschlag Verkauf (%)','0')}${f('s_sf','Verkaufsgebühren (EUR)','0')}${f('s_inf','Inflation p. a. (%)','0')}${f('s_y','Haltedauer (Jahre)','1')}<p><button class="btn p" data-a=sim>Berechnen</button></p></div>${R?(R.err?`<div class="card bad">${esc(R.err)}</div>`:`<div class=card><table><tr><td>Gesamtkosten</td><td>${money(R.buyTotal,'EUR')}</td></tr><tr><td>Nettoverkauf (Schätzung)</td><td>${money(R.sellNet,'EUR')}</td></tr><tr><td>Gewinn nominal</td><td class=${R.profit>=0?'good':'bad'}>${money(R.profit,'EUR')}</td></tr><tr><td>Rendite nominal / real</td><td>${pc(R.ret)} / ${pc(R.real)}</td></tr><tr><td>Break-even Verkaufs-Spot</td><td>${nf(R.breakEvenSpotUsdG,4)} USD/g</td></tr><tr><td>Beitrag Metallpreis</td><td>${money(R.attribution.metalEffect,'EUR')}</td></tr><tr><td>Beitrag EUR/USD</td><td>${money(R.attribution.fxEffect,'EUR')}</td></tr><tr><td>Beitrag Kosten/Abschläge</td><td>${money(R.attribution.costEffect,'EUR')}</td></tr></table><p class=mut>Reihenfolge: Preis bei Kauf-FX → FX-Wechsel → Kosten; Summe = Gesamtgewinn. ${R.warnNegative?'<b class=bad>Warnung: negativer Nettoerlös.</b>':''} Metallreferenz ≠ Händlerankaufspreis.</p></div>`):''}`}
+function vDepot(){const eur=S.depots.length?'':'<p class=mut>Lege zuerst ein Depot an.</p>';
+ return`<h2>Depots</h2><div class=card>${eur}${S.depots.map(d=>{const ls=S.lots.filter(l=>l.depot===d.id);return`<div class=row><b>${esc(d.name)}</b><span class=mut>${ls.length} Lots · ${money(ls.reduce((a,l)=>a+l.costCents,0)/100,'EUR')}</span></div>`}).join('')}${f('d_name','Neues Depot (Name)','','inputmode=text')}<p><button class=btn data-a=newdepot>Depot anlegen</button></p></div>
+ ${S.depots.length?`<h2>Kauf hinzufügen</h2><div class=card>${so('p_d','Depot',S.depots.map(d=>[d.id,d.name]))}${so('p_m','Metall',M.map(m=>[m[0],m[1]]))}${so('p_t','Produkttyp',['Barren','Münze','Granulat','Schrott','Sonstiges'])}${f('p_date','Kaufdatum (JJJJ-MM-TT)',today(),'inputmode=text')}${f('p_h','Händler','','inputmode=text')}${f('p_g','Bruttogewicht (g)')}${f('p_f','Feinheit (0–1, z. B. 0,999)')}${so('p_c','Währung',['EUR','USD'])}${f('p_p','Kaufpreis')}${f('p_s','Versand','0')}${f('p_n','Nebenkosten','0')}${f('p_fx','FX bei USD-Kauf (USD je EUR, historisch)')}<p><button class="btn p" data-a=buy>Kauf speichern</button></p></div>`:''}
+ <h2>Lots</h2><div class=card>${S.lots.length?'<table><tr><th>Metall</th><th>Fein g</th><th>Kosten EUR</th><th>Datum</th></tr>'+S.lots.map(l=>`<tr><td>${MN[l.metal]}<br><span class=mut>${esc(S.depots.find(d=>d.id===l.depot)?.name)}</span></td><td>${nf(l.fine,4)}</td><td>${money(l.costCents/100,'EUR')}</td><td>${esc(l.date)}</td></tr>`).join('')+'</table>':'<p class=mut>Keine Buchungen.</p>'}</div>
+ <p class=mut>Noch offen (Phase D): Teilverkauf, Transfer, Belege, Ziele, Depotdiagramme, Rendite/TWR-Ansicht. Die Rechenkerne dafür sind im Kern getestet, die Oberfläche fehlt noch.</p>`}
+const SUBS={src:'Datenquellen & Prüfen',man:'Daten manuell erfassen',csv:'CSV-Import',alarm:'Alarme',prof:'Kostenprofile',mods:'Dashboard-Module',set:'Einstellungen',bak:'Datensicherung',help:'Anleitung & Info'};
+function vMore(){if(sub)return`<button class=chip data-a=sub data-v="">‹ Mehr</button><h2>${SUBS[sub]}</h2>`+SUBV[sub]();return'<h2>Mehr</h2><div class=card>'+Object.keys(SUBS).map(k=>`<button class=row data-a=sub data-v=${k}><span>${SUBS[k]}</span><span class=mut>›</span></button>`).join('')+'</div>'}
+const PROBES=[...['XAU','XAG','XPT','XPD','HG'].map(s=>['gold-api '+s,'https://api.gold-api.com/price/'+s]),['Frankfurter v2 (Kandidat)','https://api.frankfurter.dev/v2/rates?base=EUR&quotes=USD'],['Treasury nominal CSV (Kandidat)','https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv'],['FRED Fed unten (Kandidat)','https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARL'],['FRED Fed oben (Kandidat)','https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU']];
+const SUBV={
+src:()=>`<div class=card><p>Umgebung: <b>${location.protocol}</b> · ${navigator.onLine?'online':'offline'} · Speicher: ${dbOk?'IndexedDB aktiv':'<b class=bad>IndexedDB nicht verfügbar – Daten werden nicht dauerhaft gespeichert</b>'}</p><p class=mut>Alle Quellen gelten als <b>ungeprüft</b>, bis „Prüfen“ hier im Zielbrowser (auch iPhone-Safari) Erfolg meldet. Ein erfolgreicher Abruf beweist CORS, nicht die Richtigkeit von Feldern/Einheiten.</p><button class="btn p" data-a=probe>Alle Quellen prüfen</button> <button class=btn data-a=copyprobe>Bericht kopieren</button></div><div class=card>${PROBES.map(p=>{const r=S.probe[p[0]];return`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${p[0]}</b> ${r?(r.ok?`<span class="tag good">erreichbar ${r.status}</span>`:'<span class="tag bad">blockiert/offline</span>'):'<span class="tag warn">ungeprüft</span>'}<br><span class=mut>${r?dt(r.at)+' · '+esc(r.ct||r.err||''):esc(p[1])}</span>${r&&r.ok?`<pre>${esc(r.head)}</pre>`:''}</div>`}).join('')}</div><div class=card><b>Live-Kurse</b><p class=mut>Gold API (Mapping ungeprüft; HG-Einheit ungeklärt → nur manuell/CSV). Automatisch alle 15 Min. nur bei geöffneter App.</p><label><input type=checkbox id=auto ${S.cfg.auto?'checked':''} data-a=auto style="width:auto;min-height:0"> Automatisch aktualisieren</label></div>`,
+man:()=>`<div class=card><b>Metallkurs</b>${so('m_m','Metall',M.map(m=>[m[0],m[1]]))}${f('m_p','Preis')}${so('m_c','Währung',['USD','EUR'],'USD')}${so('m_u','Einheit',['oz','g','kg','t','lb'],'oz')}<p><button class="btn p" data-a=manq>Speichern</button></p></div><div class=card><b>EUR/USD (USD je EUR)</b>${f('m_fx','Kurs')}<p><button class="btn p" data-a=manfx>Speichern</button></p></div><div class=card><b>US-Zins</b>${so('r_k','Indikator',[['fedLow','Fed-Zielspanne unten'],['fedHigh','Fed-Zielspanne oben'],['nom','10J nominal'],['real','10J real']])}${f('r_v','Wert (%)')}${f('r_d','Datum der Veröffentlichung (JJJJ-MM-TT)',today(),'inputmode=text')}<p><button class="btn p" data-a=manrate>Speichern</button></p></div>`,
+csv:()=>`<div class=card><p class=mut>Spalten werden zugeordnet; Zeilen ohne gültiges Datum/Zahl werden gemeldet, nichts wird interpoliert. Datum: JJJJ-MM-TT, MM/TT/JJJJ oder TT.MM.JJJJ.</p>${so('i_t','Ziel',[...M.map(m=>[m[0],m[1]+' (Preisreihe)']),['fx','EUR/USD (USD je EUR)'],['fedLow','Fed unten'],['fedHigh','Fed oben'],['nom','10J nominal'],['real','10J real']])}<label for=i_f>Datei</label><input type=file id=i_f accept=".csv,.txt,text/csv" data-a=file>${imp?`${so('i_dc','Datumsspalte',imp.h)}${so('i_vc','Wertspalte',imp.h,imp.h[1])}${so('i_c','Währung',['USD','EUR'])}${so('i_u','Einheit (nur Metalle)',['oz','g','kg','t','lb'])}<p><button class=btn data-a=prev>Vorschau</button></p>`:''}${imp&&imp.res?`<p><b>${imp.res.rows.length}</b> gültige, <b class=${imp.res.rejected.length?'warn':''}>${imp.res.rejected.length}</b> abgelehnte Zeilen.${imp.res.error?' '+esc(imp.res.error):''}</p><pre>${esc(imp.res.rows.slice(0,3).concat(imp.res.rows.slice(-3)).map(r=>r.date+'  '+r.v).join('\n'))}</pre>${imp.res.rows.length?'<button class="btn p" data-a=doimp>Importieren</button>':''}`:''}</div>`,
+alarm:()=>`<div class=card>${so('a_t','Typ',[['price','Metallpreis'],['pct','24-h-Änderung (%)'],['fx','EUR/USD']])}${so('a_m','Metall',M.map(m=>[m[0],m[1]]))}${so('a_d','Richtung',[['above','über'],['below','unter']])}${f('a_v','Schwellenwert (Preis bzw. % bzw. Kurs)')}${so('a_c','Währung (fix)',['EUR','USD'],S.cfg.cur)}${so('a_u','Einheit (fix)',['oz','g','kg','t'],S.cfg.unit)}<p><button class="btn p" data-a=newalarm>Alarm anlegen</button> <button class=btn data-a=notif>Benachrichtigungen erlauben</button></p><p class=mut>Prüfung nur bei geöffneter App; kein Hintergrundalarm. Kein Auslösen beim Anlegen, bei veralteten Kursen oder Lücken.</p></div><div class=card>${S.alarms.length?S.alarms.map(a=>`<div class=row><span>${a.type==='fx'?'EUR/USD':MN[a.metal]} ${a.dir==='above'?'>':'<'} ${a.thr}${a.type==='pct'?' %':a.type==='fx'?'':' '+a.cur+'/'+a.unit}<br><span class=mut>${a.paused?'pausiert':a.st.state}</span></span><span><button class=chip data-a=apause data-v=${a.id}>${a.paused?'▶':'⏸'}</button><button class=chip data-a=adel data-v=${a.id} aria-label=Löschen>✕</button></span></div>`).join(''):'<p class=mut>Keine Alarme.</p>'}</div><h2>Verlauf</h2><div class=card>${S.ahist.slice(-20).reverse().map(h=>`<div class=mut>${dt(h.t)} – ${esc(h.m)}</div>`).join('')||'<p class=mut>Leer.</p>'}${S.ahist.length?'<p><button class=btn data-a=clrhist>Verlauf löschen</button></p>':''}</div>`,
+prof:()=>'<p class=mut>Eigene Händlerkonditionen (keine erfundenen Preise). Ohne Profil fehlt der Kostenfaktor im Score.</p>'+M.map(m=>`<div class=card><b>${m[1]}</b>${f('pb_'+m[0],'Kaufaufschlag (%)',S.prof[m[0]]?.buy??'')}${f('ps_'+m[0],'Verkaufsabschlag (%)',S.prof[m[0]]?.sell??'')}</div>`).join('')+'<button class="btn p" data-a=saveprof>Speichern</button>',
+mods:()=>`<div class=card>${S.cfg.order.map((k,i)=>`<div class=row><label style="margin:0"><input type=checkbox style="width:auto;min-height:0" data-a=modt data-v=${k} ${S.cfg.hide.includes(k)?'':'checked'}> ${MODS[k]}</label><span><button class=chip data-a=modu data-v=${i} aria-label=Hoch>↑</button><button class=chip data-a=modd data-v=${i} aria-label=Runter>↓</button></span></div>`).join('')}</div>`,
+set:()=>`<div class=card>${so('t_t','Darstellung',[['auto','System'],['light','Hell'],['dark','Dunkel']],S.cfg.theme)}<p><button class="btn p" data-a=savetheme>Übernehmen</button></p></div>`,
+bak:()=>`<div class="card warn"><b>Noch nicht umgesetzt (Phase E):</b> vollständiges Backup mit Belegen (ZIP), Restore/Merge, CSV-/PDF-Export. Bis dahin liegen Daten nur in diesem Browser-Speicher.</div>`,
+help:()=>`<div class=card><p><b>Version ${VERSION}</b></p><p class=mut>Historische Indikation, keine Anlageberatung, keine Prognose. Daten bleiben lokal; es gibt keine Telemetrie und keine Cloud. Marktabfragen übertragen nur die Quellanfrage. Metallreferenz ≠ Händlerankaufspreis. Steuerliche Fragen: keine Auskunft.</p><p class=mut>Bedienung siehe SMZ_Edelmetall_Bedienungsanleitung.md. Marktnews-Modul: deaktiviert (keine verlässliche freie Quelle).</p></div>`};
+/* ---------- Aktionen ---------- */
+async function refresh(){const cfg=SRC['gold-api'];let ok=0,msg=[];for(const [id,,sym] of M){if(id==='cu'){msg.push('Kupfer: Einheit ungeklärt – nur manuell/CSV');continue}
+ const r=await F.fetchJson(sym,cfg.baseUrl.replace('{symbol}',sym));if(!r.ok){msg.push(sym+': '+r.error+(r.detail?' ('+r.detail+')':''));continue}
+ const n=A.normalizeQuote({provider:'gold-api',instrument:sym,quoteType:'spot',currency:cfg.currency,unit:cfg.units[sym],staleAfterMs:cfg.staleAfterMs,license:cfg.license,verified:cfg.verified,map:cfg.map},r.json,Date.now());
+ if(!n.ok){msg.push(sym+': '+n.error);continue}S.q[id]=Object.assign({},n.quote,{source:'gold-api',flags:n.quote.qualityFlags});(S.hist[id]=S.hist[id]||[]).push({t:n.quote.retrievedAt,v:n.quote.price});S.hist[id]=S.hist[id].slice(-600);ok++}
+ lastRef=Date.now();await save();checkAlarms();if(tab==='start'||tab==='markets'||sub==='src')render();toast(ok?`${ok} Kurse aktualisiert`+(msg.length?'; '+msg[0]:''):'Keine Live-Kurse: '+(msg[0]||'unbekannt'),!ok)}
+const F=A.createFetcher({fetchImpl:(u,o)=>fetch(u,Object.assign({cache:'no-store'},o)),isOnline:()=>navigator.onLine!==false});
+function alarmVal(a){if(a.type==='fx')return S.fx&&!stale(S.fx)?S.fx.rate:null;const q=S.q[a.metal];if(!q||stale(q))return null;if(a.type==='price')return conv(q,a.cur,a.unit);return C.change24h(S.hist[a.metal]||[],Date.now(),q.price)*100}
+function checkAlarms(){for(const a of S.alarms){if(a.paused)continue;const v=alarmVal(a);if(v==null||!isFinite(v))continue;if(C.alarmStep(a.st,v,false)){const m=`${a.type==='fx'?'EUR/USD':MN[a.metal]} ${a.dir==='above'?'über':'unter'} ${a.thr} (aktuell ${nf(v,3)})`;S.ahist.push({t:Date.now(),m});toast('Alarm: '+m);if('Notification'in window&&Notification.permission==='granted')new Notification('SMZ Alarm',{body:m})}}}
+const ACT={
+cur:v=>{S.cfg.cur=v},unit:v=>{S.cfg.unit=v},per:v=>{per=v},area:()=>{area=!area},back:()=>{sel=null},open:v=>{tab='markets';sel=v},fav:v=>{const a=S.cfg.favs,i=a.indexOf(v);i<0?a.push(v):a.splice(i,1)},sub:v=>{sub=v||null;imp=null},refresh:()=>refresh(),
+auto:()=>{S.cfg.auto=$('#auto').checked},
+csvx:id=>{const r=rows(id),b=new Blob(['Datum;Wert '+S.cfg.cur+'/'+S.cfg.unit+'\n'+r.map(x=>x.date+';'+x.v).join('\n')],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=MN[id]+'.csv';a.click()},
+sim:()=>{const g=N('s_g'),p=x=>N(x)/100;const v={fineG:g,buySpotUsdG:N('s_bs'),buyFx:N('s_bfx'),buyPremium:p('s_bp'),buyFixedEur:N('s_bf'),sellSpotUsdG:N('s_ss'),sellFx:N('s_sfx'),sellDiscount:p('s_sd'),sellFeeEur:N('s_sf'),inflation:p('s_inf'),years:N('s_y')};
+ S.simRes=Object.values(v).some(x=>!isFinite(x))||g<=0||v.buyFx<=0||v.sellFx<=0?{err:'Bitte alle Felder mit gültigen Zahlen füllen (Gewicht und EUR/USD > 0).'}:C.simulate(v)},
+newdepot:()=>{const n=V('d_name').trim();if(!n)return toast('Name fehlt',1);S.depots.push({id:crypto.randomUUID(),name:n})},
+buy:()=>{const g=N('p_g'),fi=N('p_f'),pr=N('p_p'),sh=N('p_s')||0,ne=N('p_n')||0,cur=V('p_c');if(!(g>0)||!(fi>0&&fi<=1)||!(pr>=0))return toast('Gewicht > 0, Feinheit 0–1 und Preis prüfen',1);let fx=null;if(cur==='USD'){fx=N('p_fx');if(!(fx>0))return toast('Für USD-Kauf historischen EUR/USD-Kurs angeben',1)}
+ const tot=pr+sh+ne,cents=Math.round((cur==='USD'?C.usdToEur(tot,fx):tot)*100),l=C.newLot(crypto.randomUUID(),V('p_d'),V('p_m'),g,fi,cents,V('p_date'));Object.assign(l,{type:V('p_t'),dealer:V('p_h'),gross:g,fineness:fi,cur,orig:pr,ship:sh,extra:ne,fx,fxSrc:'manuell'});S.lots.push(l)},
+manq:()=>{const p=N('m_p');if(!(p>0))return toast('Preis ungültig',1);S.q[V('m_m')]={provider:'manuell',price:p,currency:V('m_c'),unit:V('m_u'),asOf:Date.now(),retrievedAt:Date.now(),source:'manuell',flags:[]};(S.hist[V('m_m')]=S.hist[V('m_m')]||[]).push({t:Date.now(),v:p})},
+manfx:()=>{const r=N('m_fx');if(!(r>0))return toast('Kurs ungültig',1);S.fx={rate:r,asOf:Date.now(),source:'manuell'}},
+manrate:()=>{const k=V('r_k'),v=N('r_v');if(!isFinite(v)||!/^\d{4}-\d{2}-\d{2}$/.test(V('r_d')))return toast('Wert/Datum ungültig',1);const o=S.rates[k];S.rates[k]={v,date:V('r_d'),prev:o?o.v:null,src:'manuell'}},
+file:async()=>{const fl=$('#i_f').files[0];if(!fl)return;const tx=await fl.text(),l=tx.split(/\r?\n/)[0],dl=l.includes(';')?';':l.includes('\t')?'\t':',';imp={tx,dl,h:l.split(dl).map(x=>x.trim().replace(/^"|"$/g,'')),res:null};render(true)},
+prev:()=>{imp.res=A.parseCsvSeries(imp.tx,{dateCol:V('i_dc'),valueCol:V('i_vc'),delimiter:imp.dl});imp.cfg={dc:V('i_dc'),vc:V('i_vc'),cur:V('i_c'),u:V('i_u'),t:V('i_t')}},
+doimp:()=>{const c=imp.cfg,t=c.t,rs=imp.res.rows;if(['fedLow','fedHigh','nom','real'].includes(t)){const n=rs.length;S.rates[t]={v:rs[n-1].v,date:rs[n-1].date,prev:n>1?rs[n-2].v:null,src:'CSV-Import'}}
+ else{const isFx=t==='fx',cur=isFx?'USD':c.cur,old=S.ser[t];if(old&&old.cur!==cur)return toast('Vorhandene Reihe hat andere Währung ('+old.cur+') – gemischte Kursarten nicht erlaubt',1);const m=new Map(((old&&old.rows)||[]).map(r=>[r.date,r.v])),d=isFx?1:C.toGrams(1,c.u);rs.forEach(r=>m.set(r.date,r.v/d));S.ser[t]={cur,src:'CSV-Import',at:Date.now(),rows:[...m].map(([date,v])=>({date,v})).sort((a,b)=>a.date<b.date?-1:1)}}
+ toast('Import abgeschlossen: '+rs.length+' Werte');imp=null},
+newalarm:()=>{const v=N('a_v');if(!isFinite(v))return toast('Schwellenwert ungültig',1);const t=V('a_t');S.alarms.push({id:crypto.randomUUID(),type:t,metal:V('a_m'),dir:V('a_d'),thr:v,cur:V('a_c'),unit:V('a_u'),paused:false,st:C.makeAlarm(V('a_d'),v)})},
+apause:id=>{const a=S.alarms.find(x=>x.id===id);a.paused=!a.paused;if(!a.paused)a.st=C.makeAlarm(a.dir,a.thr)},adel:id=>{S.alarms=S.alarms.filter(x=>x.id!==id)},clrhist:()=>{S.ahist=[]},
+notif:async()=>{if(!('Notification'in window))return toast('Benachrichtigungen werden hier nicht unterstützt',1);const r=await Notification.requestPermission();toast(r==='granted'?'Erlaubt (nur bei geöffneter App)':'Berechtigung verweigert',r!=='granted')},
+saveprof:()=>{for(const m of M){const b=parseFloat(V('pb_'+m[0]).replace(',','.')),s=parseFloat(V('ps_'+m[0]).replace(',','.'));S.prof[m[0]]={buy:isFinite(b)?b:null,sell:isFinite(s)?s:null}}toast('Gespeichert')},
+modt:v=>{const h=S.cfg.hide,i=h.indexOf(v);i<0?h.push(v):h.splice(i,1)},modu:v=>{v=+v;const o=S.cfg.order;if(v>0)[o[v-1],o[v]]=[o[v],o[v-1]]},modd:v=>{v=+v;const o=S.cfg.order;if(v<o.length-1)[o[v+1],o[v]]=[o[v],o[v+1]]},
+savetheme:()=>{S.cfg.theme=V('t_t');theme()},
+probe:async()=>{toast('Prüfe Quellen …');for(const [n,u] of PROBES){const r={at:Date.now()};try{const x=await fetch(u,{cache:'no-store'}),tx=await x.text();Object.assign(r,{ok:true,status:x.status,ct:x.headers.get('content-type'),head:tx.slice(0,300)})}catch(e){r.ok=false;r.err='Blockiert oder unerreichbar (CORS, offline oder DNS – der Browser unterscheidet das nicht)'}S.probe[n]=r;sub==='src'&&render()}},
+copyprobe:()=>navigator.clipboard.writeText(JSON.stringify({env:{proto:location.protocol,ua:navigator.userAgent,at:new Date().toISOString()},probe:S.probe},null,1)).then(()=>toast('Bericht kopiert'),()=>toast('Kopieren nicht erlaubt',1))};
+const NOSAVE=['cur','unit','per','area','back','open','sub','refresh','csvx','file','prev','probe','copyprobe','notif','sim'];
+document.addEventListener('click',async e=>{const t=e.target.closest('[data-a]');if(!t||t.type==='checkbox'||t.type==='file')return;await run(t)});
+document.addEventListener('change',async e=>{const t=e.target.closest('[data-a]');if(t&&(t.type==='checkbox'||t.type==='file'))await run(t)});
+async function run(t){const a=t.dataset.a;try{await ACT[a](t.dataset.v)}catch(err){toast('Fehler: '+err.message,1)}if(!['refresh','probe','file'].includes(a)){checkAlarms();render(!['sub','open','back'].includes(a));if(!NOSAVE.includes(a)||['cur','unit'].includes(a))await save()}}
+function render(keep){const kv={};if(keep)document.querySelectorAll('#v input:not([type=file]):not([type=checkbox]),#v select').forEach(e=>{if(e.id)kv[e.id]=e.value});const T=[['start','Start','◈'],['markets','Märkte','⌇'],['sim','Simulator','∑'],['depot','Depot','▣'],['more','Mehr','⋯']];$('#nav').innerHTML=T.map(x=>`<button data-t=${x[0]} ${tab===x[0]?'aria-current=page':''}><span aria-hidden=true>${x[2]}</span>${x[1]}</button>`).join('');
+ const sc=scrollY;$('#v').innerHTML=({start:vStart,markets:vMarkets,sim:vSim,depot:vDepot,more:vMore})[tab]();for(const id in kv){const el=document.getElementById(id);if(el&&!(el.tagName==='SELECT'&&![...el.options].some(o=>o.value===kv[id])))el.value=kv[id]}scrollTo(0,sc)}
+$('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-t]');if(!b)return;if(tab===b.dataset.t&&b.dataset.t==='markets')sel=null;if(b.dataset.t!=='more')sub=null;tab=b.dataset.t;render();scrollTo(0,0)});
+function theme(){const d=S.cfg.theme==='auto'?matchMedia('(prefers-color-scheme: dark)').matches:S.cfg.theme==='dark';document.documentElement.dataset.theme=d?'dark':'light'}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',theme);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.cfg.auto&&Date.now()-lastRef>9e5)refresh()});setInterval(()=>{if(!document.hidden&&S.cfg.auto&&Date.now()-lastRef>9e5)refresh()},6e4);
+load().then(()=>{theme();render();if(!dbOk)toast('Dauerhafter Speicher nicht verfügbar (z. B. file:// oder Privatmodus). Daten gehen beim Schließen verloren.',1);if(S.cfg.auto)refresh()});
+</script>
+</body></html>
